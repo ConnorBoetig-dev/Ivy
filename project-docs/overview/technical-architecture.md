@@ -233,4 +233,4 @@ src/
 - Use feature flags for gradual rollout of new capabilities
 - Plan for disaster recovery and data backup strategies
 
-**Next**: Begin implementation with `02-phases/phase-01-setup.md`
+**Next**: Begin implementation with `phases/phase-01-setup.md`

@@ -25,41 +25,38 @@ Building a production-ready AI-powered media search application where users uplo
 - [ ] **Phase 17**: Operations & Monitoring
 
 ### 📚 Essential Reading Order
-1. **Start Here**: `01-overview/project-overview.md` - Complete project understanding
-2. **Architecture**: `01-overview/technical-architecture.md` - System design
-3. **Current Phase**: `02-phases/phase-01-setup.md` - Begin implementation
-4. **Reference**: Use `03-reference/` for specific details during development
+1. **Start Here**: `overview/project-overview.md` - Complete project understanding
+2. **Architecture**: `overview/technical-architecture.md` - System design
+3. **Current Phase**: `phases/phase-01-setup.md` - Begin implementation
+4. **Reference**: Use `reference/` for specific details during development
 
 ### 🔧 Key Reference Files
-- **Environment Setup**: `03-reference/environment-variables.md`
-- **Database Schema**: `03-reference/database-schema.md`
-- **API Documentation**: `03-reference/api-endpoints.md`
-- **File Structure**: `03-reference/project-structure.md`
+- **Environment Setup**: `reference/environment-variables.md`
+- **Database Schema**: `reference/database-schema.md`
+- **API Documentation**: `reference/api-endpoints.md`
+- **File Structure**: `reference/project-structure.md`
 
 ### ✅ Verification Checklists
-- **Security**: `05-checklists/security-checklist.md`
-- **Performance**: `05-checklists/performance-checklist.md`
-- **Deployment**: `05-checklists/deployment-checklist.md`
+- **Security**: `checklists/security-checklist.md`
+- **Progress Tracking**: `checklists/check-progress.md`
 
 ## 🏗️ Development Workflow
 
 ### For Each Phase:
-1. Read the phase file: `02-phases/phase-XX-[name].md`
+1. Read the phase file: `phases/phase-XX-[name].md`
 2. Check prerequisites and dependencies
 3. Follow step-by-step implementation
-4. Reference implementation details in `04-implementation/`
+4. Reference implementation details in `implementation/`
 5. Verify completion with appropriate checklist
 6. Update this README's progress tracker
 
 ### Getting Help:
-- **Stuck on implementation?** Check `04-implementation/` for detailed patterns
-- **Need specific reference?** Use `03-reference/` files
-- **Ready to verify?** Use `05-checklists/` for validation
+- **Stuck on implementation?** Check `implementation/` for detailed patterns
+- **Need specific reference?** Use `reference/` files
+- **Ready to verify?** Use `checklists/` for validation
 
 ## 🎨 Code Templates
-- **Component Templates**: `06-templates/component-templates.md`
-- **API Route Templates**: `06-templates/api-templates.md`
-- **Service Templates**: `06-templates/service-templates.md`
+- **Complete Templates**: `templates/code-templates.md`
 
 ## 📊 Success Metrics
 - **Performance**: Sub-2-second search response times, 99.9% uptime
@@ -70,4 +67,4 @@ Building a production-ready AI-powered media search application where users uplo
 
 ---
 
-**Next Action**: Read `01-overview/project-overview.md` to understand the complete vision, then begin with `02-phases/phase-01-setup.md`
+**Next Action**: Read `overview/project-overview.md` to understand the complete vision, then begin with `phases/phase-01-setup.md`

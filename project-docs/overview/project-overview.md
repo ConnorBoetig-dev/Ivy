@@ -179,6 +179,6 @@ Testing, deployment, operations, monitoring
 ---
 
 **Next Steps**: 
-1. Review technical architecture in `01-overview/technical-architecture.md`
-2. Begin implementation with `02-phases/phase-01-setup.md`
-3. Reference environment setup in `03-reference/environment-variables.md`
+1. Review technical architecture in `overview/technical-architecture.md`
+2. Begin implementation with `phases/phase-01-setup.md`
+3. Reference environment setup in `reference/environment-variables.md`
