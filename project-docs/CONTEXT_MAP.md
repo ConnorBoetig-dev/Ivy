@@ -56,17 +56,25 @@ project-docs/
 │   ├── 📄 phase-16-production-deployment.md # ✅ Production infrastructure
 │   └── 📄 phase-17-operations-monitoring.md # ✅ Operations & monitoring
 ├── 📁 reference/
-│   ├── 📄 api-endpoints.md            # API documentation
-│   ├── 📄 database-schema.md          # Database structure
-│   ├── 📄 environment-variables.md    # Environment configuration
-│   └── 📄 project-structure.md        # Code organization
+│   ├── 📄 api-documentation.md        # Complete API documentation with examples
+│   ├── 📄 database-schema.md          # Database structure and relationships
+│   ├── 📄 environment-variables.md    # Environment configuration guide
+│   ├── 📄 performance-optimization.md # Performance tuning guide
+│   └── 📄 project-structure.md        # Code organization and file structure
 ├── 📁 implementation/
 │   └── 📄 patterns.md                 # Code patterns and best practices
 ├── 📁 templates/
 │   └── 📄 code-templates.md           # Reusable code snippets
-└── 📁 checklists/
-    ├── 📄 check-progress.md           # Implementation checklist
-    └── 📄 security-checklist.md       # Security review checklist
+├── 📁 checklists/
+│   ├── 📄 check-progress.md           # Implementation checklist
+│   └── 📄 security-checklist.md       # Security review checklist
+├── 📁 architecture/
+│   └── 📄 decisions.md                # Architecture Decision Records (ADRs)
+├── 📁 operations/
+│   └── 📄 runbooks.md                 # Operational procedures and maintenance
+└── 📁 troubleshooting/
+    ├── 📄 common-issues.md            # Common problems and solutions
+    └── 📄 debugging-guide.md           # Debugging procedures and tools
 ```
 
 ---
