@@ -989,7 +989,13 @@ async function handleInvoicePaymentFailed(invoice: Stripe.Invoice) {
     WHERE stripe_customer_id = $1
   `, [customerId]);
 
-  // TODO: Send payment failure email
+  // Send payment failure notification
+  await sendPaymentFailureEmail(customer.email, {
+    amount: invoice.amount_due,
+    currency: invoice.currency,
+    attemptCount: invoice.attempt_count,
+    nextPaymentAttempt: invoice.next_payment_attempt
+  });
 }
 
 async function handleCustomerUpdated(customer: Stripe.Customer) {

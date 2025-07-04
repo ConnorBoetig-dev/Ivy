@@ -41,6 +41,8 @@ POSTGRES_PORT=5432
 ```bash
 # Redis Cache & Queue
 REDIS_URL="redis://localhost:6379"
+REDIS_HOST="localhost"               # Alternative to REDIS_URL
+REDIS_PORT=6379                      # Alternative to REDIS_URL
 REDIS_PASSWORD=""                     # Leave empty for local dev
 REDIS_DB=0                           # Database number
 REDIS_MAX_RETRIES=3
@@ -54,13 +56,21 @@ REDIS_COMMAND_TIMEOUT=5000           # Command timeout (ms)
 
 ### **Firebase Configuration**
 ```bash
-# Firebase Authentication
+# Firebase Authentication (Server-side)
 FIREBASE_PROJECT_ID="your-project-id"
 FIREBASE_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com"
 FIREBASE_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----"
-FIREBASE_AUTH_DOMAIN="your-project-id.firebaseapp.com"
-FIREBASE_API_KEY="your-web-api-key"
-FIREBASE_APP_ID="1:123456789:web:abcdef"
+FIREBASE_ADMIN_PROJECT_ID="your-project-id"               # Alternative to FIREBASE_PROJECT_ID
+FIREBASE_ADMIN_CLIENT_EMAIL="firebase-adminsdk-xxxxx@your-project-id.iam.gserviceaccount.com"
+FIREBASE_ADMIN_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----\nYOUR_PRIVATE_KEY_HERE\n-----END PRIVATE KEY-----"
+
+# Firebase Client-side (Public)
+NEXT_PUBLIC_FIREBASE_API_KEY="your-web-api-key"
+NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN="your-project-id.firebaseapp.com"
+NEXT_PUBLIC_FIREBASE_PROJECT_ID="your-project-id"
+NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET="your-project-id.appspot.com"
+NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID="123456789"
+NEXT_PUBLIC_FIREBASE_APP_ID="1:123456789:web:abcdef"
 
 # Firebase Admin SDK
 FIREBASE_ADMIN_SDK_PATH="/path/to/firebase-admin-sdk.json"  # Alternative to private key
@@ -88,12 +98,18 @@ STRIPE_PUBLISHABLE_KEY="pk_test_xxxxx"                     # Use pk_live_ in pro
 STRIPE_WEBHOOK_SECRET="whsec_xxxxx"                        # Webhook endpoint secret
 STRIPE_CUSTOMER_PORTAL_URL="https://billing.stripe.com/p/login/xxxxx"
 
-# Stripe Product IDs
+# Stripe Product IDs (Server-side)
 STRIPE_PRICE_FREE="price_xxxxx"                            # Free tier (if applicable)
 STRIPE_PRICE_PREMIUM="price_xxxxx"                         # Premium monthly
 STRIPE_PRICE_ULTIMATE="price_xxxxx"                        # Ultimate monthly
 STRIPE_PRICE_PREMIUM_ANNUAL="price_xxxxx"                  # Premium annual
 STRIPE_PRICE_ULTIMATE_ANNUAL="price_xxxxx"                 # Ultimate annual
+
+# Stripe Product IDs (Client-side)
+NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY="pk_test_xxxxx"         # Use pk_live_ in production
+NEXT_PUBLIC_STRIPE_PRICE_FREE="price_xxxxx"               # Public price IDs for client
+NEXT_PUBLIC_STRIPE_PRICE_PREMIUM="price_xxxxx"
+NEXT_PUBLIC_STRIPE_PRICE_ULTIMATE="price_xxxxx"
 ```
 
 ---
@@ -114,12 +130,19 @@ AWS_S3_REGION="us-east-1"
 AWS_S3_MEDIA_BUCKET="ai-media-search-media"
 AWS_S3_THUMBNAILS_BUCKET="ai-media-search-thumbnails"
 AWS_S3_PRESIGNED_URL_EXPIRY=3600                          # 1 hour in seconds
+AWS_S3_BUCKET="ai-media-search-storage"                   # Default bucket alias
 
 # AI Services
 AWS_REKOGNITION_MAX_LABELS=50
 AWS_REKOGNITION_MIN_CONFIDENCE=80
+AWS_REKOGNITION_ROLE_ARN="arn:aws:iam::123456789012:role/RekognitionServiceRole"
 AWS_TRANSCRIBE_LANGUAGE_CODE="en-US"
 AWS_COMPREHEND_LANGUAGE_CODE="en"
+AWS_SNS_TOPIC_ARN="arn:aws:sns:us-east-1:123456789012:rekognition-video-notifications"
+
+# AWS Textract (for PDF processing)
+AWS_TEXTRACT_ENABLED=true
+AWS_TEXTRACT_MAX_PAGES=15                                  # Maximum pages to process per document
 ```
 
 ---
@@ -180,6 +203,15 @@ ANALYTICS_ENABLED=true
 SENTRY_DSN="https://xxxxx@sentry.io/xxxxx"
 SENTRY_ENVIRONMENT="development"                          # development, staging, production
 SENTRY_TRACES_SAMPLE_RATE=0.1                           # 10% trace sampling
+
+# Testing Environment
+TEST_DB_HOST="localhost"                                 # Test database host
+TEST_DB_PORT=5433                                        # Test database port (different from main)
+TEST_DB_NAME="ai_media_search_test"                      # Test database name
+TEST_DB_USER="test_user"                                 # Test database user
+TEST_DB_PASSWORD="test_password"                         # Test database password
+TEST_AUTH_TOKEN="test-token-123"                         # Test authentication token
+FIREBASE_AUTH_EMULATOR_HOST="localhost:9099"             # Firebase Auth emulator for testing
 ```
 
 ---
@@ -201,6 +233,13 @@ ENABLE_VIDEO_PROCESSING=true
 ENABLE_COST_TRACKING=true
 ENABLE_DEBUG_MODE=false                                  # Set to false in production
 ENABLE_WEBHOOK_PROCESSING=true
+ENABLE_WORKERS=false                                     # Enable queue workers (set true for non-serverless)
+
+# Worker Configuration
+IMAGE_WORKER_INSTANCES=3                                 # Number of image processing workers
+VIDEO_WORKER_INSTANCES=2                                 # Number of video processing workers
+TEXT_WORKER_INSTANCES=5                                  # Number of text analysis workers
+EMBEDDING_WORKER_INSTANCES=10                            # Number of embedding generation workers
 ```
 
 ### **Rate Limiting**

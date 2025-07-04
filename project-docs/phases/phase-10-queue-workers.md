@@ -5,8 +5,8 @@ This phase implements a robust job queue system using BullMQ with the existing R
 
 ## ✅ Prerequisites
 - Phase 5 completed (Redis cache setup at `src/lib/cache/redis-client.ts`)
-- Phase 7 completed (Cost tracking service at `src/lib/services/cost-service.ts`)
-- Phase 9 completed (AWS services at `src/lib/aws/`)
+- Phase 7 completed (Cost tracking service at `src/services/cost-tracking.ts`)
+- Phase 9 completed (AWS services at `src/services/aws/`)
 - Phase 4 completed (Winston logger)
 - Redis server running
 - AWS credentials configured
@@ -27,7 +27,7 @@ This phase implements a robust job queue system using BullMQ with the existing R
 ### 1.1 Install BullMQ
 ```bash
 connorboetig@connor:~/network_mapper$ cd ~/projects/ai-media-search
-npm install bullmq
+npm install bullmq pdf-parse @aws-sdk/client-textract
 npm install --save-dev @types/node
 ```
 
@@ -39,6 +39,7 @@ export enum JobType {
   IMAGE_PROCESSING = 'image-processing',
   VIDEO_PROCESSING = 'video-processing',
   TEXT_ANALYSIS = 'text-analysis',
+  DOCUMENT_PROCESSING = 'document-processing',
   EMBEDDING_GENERATION = 'embedding-generation'
 }
 
@@ -84,10 +85,19 @@ export interface TextAnalysisJobData extends BaseJobData {
   };
 }
 
+export interface DocumentProcessingJobData extends BaseJobData {
+  documentType: 'pdf' | 'docx' | 'txt';
+  operations: {
+    extractText?: boolean;
+    detectTables?: boolean;
+    detectForms?: boolean;
+  };
+}
+
 export interface EmbeddingGenerationJobData extends BaseJobData {
   content: string;
   contentType: 'text' | 'image' | 'video';
-  metadata?: Record<string, any>;
+  metadata?: Record<string, string | number | boolean>;
 }
 
 export interface JobProgress {
@@ -111,14 +121,15 @@ export interface JobProgress {
 Create `src/lib/queue/queue-manager.ts`:
 
 ```typescript
-import { Queue, Worker, Job, QueueEvents } from 'bullmq';
+import { Queue, Worker, Job, QueueEvents, ConnectionOptions } from 'bullmq';
 import { getRedisClient } from '@/lib/cache/redis-client';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
 import {
   JobType,
   ImageProcessingJobData,
   VideoProcessingJobData,
   TextAnalysisJobData,
+  DocumentProcessingJobData,
   EmbeddingGenerationJobData,
   JobProgress
 } from '@/types/queue.types';
@@ -127,7 +138,7 @@ export class QueueManager {
   private static instance: QueueManager;
   private queues: Map<JobType, Queue> = new Map();
   private queueEvents: Map<JobType, QueueEvents> = new Map();
-  private connection: any;
+  private connection: ConnectionOptions;
 
   private constructor() {}
 
@@ -138,7 +149,7 @@ export class QueueManager {
     return QueueManager.instance;
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     try {
       const redisClient = getRedisClient();
       this.connection = {
@@ -225,6 +236,26 @@ export class QueueManager {
     });
   }
 
+  async addDocumentProcessingJob(data: DocumentProcessingJobData) {
+    const queue = this.queues.get(JobType.DOCUMENT_PROCESSING);
+    if (!queue) throw new Error('Document processing queue not initialized');
+
+    return await queue.add('process-document', data, {
+      attempts: 3,
+      backoff: {
+        type: 'exponential',
+        delay: 2000,
+      },
+      removeOnComplete: {
+        age: 3600,
+        count: 100,
+      },
+      removeOnFail: {
+        age: 24 * 3600,
+      },
+    });
+  }
+
   async addEmbeddingJob(data: EmbeddingGenerationJobData) {
     const queue = this.queues.get(JobType.EMBEDDING_GENERATION);
     if (!queue) throw new Error('Embedding generation queue not initialized');
@@ -268,10 +299,10 @@ export class QueueManager {
   }
 
   getQueueEvents(jobType: JobType): QueueEvents | undefined {
-    return this.queueEvents.set(jobType);
+    return this.queueEvents.get(jobType);
   }
 
-  async shutdown() {
+  async shutdown(): Promise<void> {
     for (const queue of this.queues.values()) {
       await queue.close();
     }
@@ -292,22 +323,22 @@ export const queueManager = QueueManager.getInstance();
 Create `src/workers/base-worker.ts`:
 
 ```typescript
-import { Worker, Job } from 'bullmq';
-import { logger } from '@/lib/logger';
-import { CostService } from '@/lib/services/cost-service';
-import { db } from '@/lib/db';
+import { Worker, Job, ConnectionOptions } from 'bullmq';
+import { logger } from '@/lib/monitoring/logger';
+import { CostTrackingService } from '@/services/cost-tracking';
+import { db } from '@/lib/database';
 import { JobProgress } from '@/types/queue.types';
 
 export abstract class BaseWorker<T> {
   protected worker: Worker<T>;
-  protected costService: CostService;
+  protected costService: CostTrackingService;
 
   constructor(
     queueName: string,
-    connection: any,
+    connection: ConnectionOptions,
     concurrency: number = 1
   ) {
-    this.costService = new CostService();
+    this.costService = new CostTrackingService();
     
     this.worker = new Worker<T>(
       queueName,
@@ -351,17 +382,17 @@ export abstract class BaseWorker<T> {
     this.setupEventHandlers();
   }
 
-  protected abstract process(job: Job<T>): Promise<any>;
+  protected abstract process(job: Job<T>): Promise<unknown>;
 
-  protected async updateProgress(job: Job<T>, progress: JobProgress) {
+  protected async updateProgress(job: Job<T>, progress: JobProgress): Promise<void> {
     await job.updateProgress(progress);
   }
 
   protected async updateMediaItemStatus(
     mediaItemId: string,
     status: string,
-    metadata?: any
-  ) {
+    metadata?: Record<string, unknown>
+  ): Promise<void> {
     try {
       await db('media_items')
         .where('id', mediaItemId)
@@ -380,8 +411,8 @@ export abstract class BaseWorker<T> {
     service: string,
     operation: string,
     cost: number,
-    metadata?: any
-  ) {
+    metadata?: Record<string, unknown>
+  ): Promise<void> {
     try {
       await this.costService.trackUsage(
         userId,
@@ -409,7 +440,7 @@ export abstract class BaseWorker<T> {
     });
   }
 
-  async close() {
+  async close(): Promise<void> {
     await this.worker.close();
   }
 }
@@ -420,20 +451,27 @@ Create `src/workers/image-processing-worker.ts`:
 
 ```typescript
 import { Job } from 'bullmq';
-import { BaseWorker } from './base-worker';
-import { rekognitionService } from '@/lib/aws/rekognition-service';
-import { s3Service } from '@/lib/aws/s3-service';
+import { BaseWorker } from '@/workers/base-worker';
+import { rekognitionService } from '@/services/aws/rekognition-service';
+import { s3Service } from '@/services/aws/s3-service';
 import { ImageProcessingJobData, JobStatus } from '@/types/queue.types';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
+
+interface ImageProcessingResult {
+  labels?: any[];
+  text?: any[];
+  faces?: any[];
+  moderation?: any[];
+}
 
 export class ImageProcessingWorker extends BaseWorker<ImageProcessingJobData> {
-  constructor(connection: any) {
+  constructor(connection: ConnectionOptions) {
     super('image-processing', connection, 3); // Process 3 images concurrently
   }
 
-  protected async process(job: Job<ImageProcessingJobData>) {
+  protected async process(job: Job<ImageProcessingJobData>): Promise<ImageProcessingResult> {
     const { userId, mediaItemId, s3Key, operations } = job.data;
-    const results: any = {};
+    const results: ImageProcessingResult = {};
     let totalCost = 0;
 
     try {
@@ -566,21 +604,30 @@ Create `src/workers/video-processing-worker.ts`:
 
 ```typescript
 import { Job } from 'bullmq';
-import { BaseWorker } from './base-worker';
-import { transcribeService } from '@/lib/aws/transcribe-service';
-import { rekognitionService } from '@/lib/aws/rekognition-service';
-import { s3Service } from '@/lib/aws/s3-service';
+import { BaseWorker } from '@/workers/base-worker';
+import { transcribeService } from '@/services/aws/transcribe-service';
+import { rekognitionService } from '@/services/aws/rekognition-service';
+import { s3Service } from '@/services/aws/s3-service';
 import { VideoProcessingJobData, JobStatus } from '@/types/queue.types';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
+
+interface VideoProcessingResult {
+  transcription?: any;
+  labels?: any[];
+  thumbnails?: {
+    count: number;
+    s3Keys: string[];
+  };
+}
 
 export class VideoProcessingWorker extends BaseWorker<VideoProcessingJobData> {
-  constructor(connection: any) {
+  constructor(connection: ConnectionOptions) {
     super('video-processing', connection, 2); // Process 2 videos concurrently
   }
 
-  protected async process(job: Job<VideoProcessingJobData>) {
+  protected async process(job: Job<VideoProcessingJobData>): Promise<VideoProcessingResult> {
     const { userId, mediaItemId, s3Key, operations, duration = 0 } = job.data;
-    const results: any = {};
+    const results: VideoProcessingResult = {};
     let totalCost = 0;
 
     try {
@@ -643,16 +690,53 @@ export class VideoProcessingWorker extends BaseWorker<VideoProcessingJobData> {
           }
         });
 
-        // For video label detection, we'll process key frames
-        // This is a simplified version - in production, you'd extract frames
-        const labelCost = 0.10; // $0.10 per minute of video
-        totalCost += labelCost * (duration / 60);
-        await this.trackCost(userId, 'rekognition', 'videoLabels', labelCost * (duration / 60), {
-          mediaItemId,
-          durationSeconds: duration
+        // Start video label detection job
+        const labelJobName = `labels-${mediaItemId}-${Date.now()}`;
+        const startLabelResult = await rekognitionService.startLabelDetection({
+          Video: {
+            S3Object: {
+              Bucket: process.env.AWS_S3_BUCKET,
+              Name: s3Key
+            }
+          },
+          MinConfidence: 70,
+          ClientRequestToken: labelJobName,
+          NotificationChannel: {
+            SNSTopic: process.env.AWS_SNS_TOPIC_ARN,
+            RoleArn: process.env.AWS_REKOGNITION_ROLE_ARN
+          },
+          JobTag: labelJobName
         });
 
-        results.labels = { message: 'Video label detection queued for processing' };
+        // Poll for label detection completion
+        let labelDetectionComplete = false;
+        let labelJobId = startLabelResult.JobId;
+        
+        while (!labelDetectionComplete) {
+          const labelStatus = await rekognitionService.getLabelDetection({
+            JobId: labelJobId,
+            MaxResults: 1000
+          });
+          
+          if (labelStatus.JobStatus === 'SUCCEEDED') {
+            labelDetectionComplete = true;
+            results.labels = labelStatus.Labels || [];
+            
+            // Calculate cost: $0.10 per minute of video
+            const labelCost = 0.10 * (duration / 60);
+            totalCost += labelCost;
+            await this.trackCost(userId, 'rekognition', 'videoLabels', labelCost, {
+              mediaItemId,
+              durationSeconds: duration,
+              labelsFound: results.labels.length
+            });
+          } else if (labelStatus.JobStatus === 'FAILED') {
+            throw new Error(`Video label detection failed: ${labelStatus.StatusMessage}`);
+          }
+          
+          // Wait 5 seconds before checking again
+          await new Promise(resolve => setTimeout(resolve, 5000));
+        }
         currentStep++;
       }
 
@@ -666,16 +750,52 @@ export class VideoProcessingWorker extends BaseWorker<VideoProcessingJobData> {
           }
         });
 
-        // Thumbnail generation would use MediaConvert or similar
-        // For now, we'll simulate it
+        // Extract frames at regular intervals
+        const thumbnailCount = 5;
+        const interval = Math.floor(duration / thumbnailCount);
+        const thumbnailKeys: string[] = [];
+        
+        for (let i = 0; i < thumbnailCount; i++) {
+          const timestamp = i * interval;
+          const thumbnailKey = `${s3Key.replace(/\.[^/.]+$/, '')}-thumb-${i}.jpg`;
+          
+          // Use Rekognition to extract frame
+          // In production, you might use AWS MediaConvert for better quality
+          const frameResult = await rekognitionService.getVideoFrame({
+            S3Object: {
+              Bucket: process.env.AWS_S3_BUCKET,
+              Name: s3Key
+            },
+            Timestamp: timestamp * 1000 // Convert to milliseconds
+          });
+          
+          // Upload extracted frame to S3
+          if (frameResult.Frame) {
+            await s3Service.uploadObject(
+              thumbnailKey,
+              Buffer.from(frameResult.Frame, 'base64'),
+              'image/jpeg',
+              { 
+                parentVideo: s3Key,
+                timestamp: timestamp.toString()
+              }
+            );
+            thumbnailKeys.push(thumbnailKey);
+          }
+        }
+        
         results.thumbnails = {
-          count: 5,
-          s3Keys: [`${s3Key}-thumb-1.jpg`, `${s3Key}-thumb-2.jpg`]
+          count: thumbnailKeys.length,
+          s3Keys: thumbnailKeys
         };
 
-        const thumbnailCost = 0.015; // Estimated cost
+        // Rekognition frame extraction cost: ~$0.003 per frame
+        const thumbnailCost = 0.003 * thumbnailCount;
         totalCost += thumbnailCost;
-        await this.trackCost(userId, 'mediaconvert', 'thumbnails', thumbnailCost, { mediaItemId });
+        await this.trackCost(userId, 'rekognition', 'frameExtraction', thumbnailCost, { 
+          mediaItemId,
+          frameCount: thumbnailCount
+        });
 
         currentStep++;
       }
@@ -716,19 +836,26 @@ Create `src/workers/text-analysis-worker.ts`:
 
 ```typescript
 import { Job } from 'bullmq';
-import { BaseWorker } from './base-worker';
-import { comprehendService } from '@/lib/aws/comprehend-service';
+import { BaseWorker } from '@/workers/base-worker';
+import { comprehendService } from '@/services/aws/comprehend-service';
 import { TextAnalysisJobData, JobStatus } from '@/types/queue.types';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
+
+interface TextAnalysisResult {
+  sentiment?: any;
+  entities?: any[];
+  keyPhrases?: any[];
+  language?: any;
+}
 
 export class TextAnalysisWorker extends BaseWorker<TextAnalysisJobData> {
-  constructor(connection: any) {
+  constructor(connection: ConnectionOptions) {
     super('text-analysis', connection, 5); // Process 5 text analyses concurrently
   }
 
-  protected async process(job: Job<TextAnalysisJobData>) {
+  protected async process(job: Job<TextAnalysisJobData>): Promise<TextAnalysisResult> {
     const { userId, mediaItemId, text, operations } = job.data;
-    const results: any = {};
+    const results: TextAnalysisResult = {};
     let totalCost = 0;
 
     try {
@@ -863,21 +990,26 @@ Create `src/workers/embedding-generation-worker.ts`:
 
 ```typescript
 import { Job } from 'bullmq';
-import { BaseWorker } from './base-worker';
+import { BaseWorker } from '@/workers/base-worker';
 import { EmbeddingGenerationJobData, JobStatus } from '@/types/queue.types';
 import { getCacheManager } from '@/lib/cache/cache-manager';
-import { db } from '@/lib/db';
-import { logger } from '@/lib/logger';
+import { db } from '@/lib/database';
+import { logger } from '@/lib/monitoring/logger';
 import crypto from 'crypto';
+
+interface EmbeddingResult {
+  source: 'cache' | 'generated';
+  embedding: number[];
+}
 
 export class EmbeddingGenerationWorker extends BaseWorker<EmbeddingGenerationJobData> {
   private cacheManager = getCacheManager();
 
-  constructor(connection: any) {
+  constructor(connection: ConnectionOptions) {
     super('embedding-generation', connection, 10); // Process 10 embeddings concurrently
   }
 
-  protected async process(job: Job<EmbeddingGenerationJobData>) {
+  protected async process(job: Job<EmbeddingGenerationJobData>): Promise<EmbeddingResult> {
     const { userId, mediaItemId, content, contentType, metadata } = job.data;
 
     try {
@@ -919,18 +1051,18 @@ export class EmbeddingGenerationWorker extends BaseWorker<EmbeddingGenerationJob
         }
       });
 
-      // Placeholder for OpenAI integration (will be implemented in Phase 11)
-      // For now, generate a mock embedding
-      const mockEmbedding = Array.from({ length: 1536 }, () => Math.random() * 2 - 1);
+      // Generate embedding using OpenAI API
+      const embedding = await this.generateEmbedding(content, contentType);
       
       // Cache the embedding
-      await this.cacheManager.set(cacheKey, mockEmbedding, 86400); // Cache for 24 hours
+      await this.cacheManager.set(cacheKey, embedding, 86400); // Cache for 24 hours
 
       // Store in database
-      await this.storeEmbedding(mediaItemId, mockEmbedding, metadata);
+      await this.storeEmbedding(mediaItemId, embedding, metadata);
 
-      // Track cost (will be real in Phase 11)
-      const embeddingCost = 0.0001; // Mock cost
+      // Track cost - OpenAI ada-002 pricing
+      const tokens = Math.ceil(content.length / 4); // Rough estimate
+      const embeddingCost = (tokens / 1000) * 0.0001; // $0.0001 per 1K tokens
       await this.trackCost(userId, 'openai', 'embedding', embeddingCost, {
         mediaItemId,
         contentLength: content.length
@@ -954,7 +1086,7 @@ export class EmbeddingGenerationWorker extends BaseWorker<EmbeddingGenerationJob
         contentLength: content.length
       });
 
-      return { source: 'generated', embedding: mockEmbedding };
+      return { source: 'generated', embedding: embedding };
     } catch (error) {
       await this.updateMediaItemStatus(mediaItemId, JobStatus.FAILED, {
         error: error instanceof Error ? error.message : 'Unknown error'
@@ -963,18 +1095,263 @@ export class EmbeddingGenerationWorker extends BaseWorker<EmbeddingGenerationJob
     }
   }
 
+  private async generateEmbedding(content: string, contentType: string): Promise<number[]> {
+    try {
+      // Use different strategies based on content type
+      let textContent = content;
+      
+      if (contentType === 'image') {
+        // For images, use the detected labels and text as content
+        const imageData = await db('media_items')
+          .where('id', content) // content is mediaItemId for images
+          .first();
+        
+        if (imageData?.metadata) {
+          const metadata = JSON.parse(imageData.metadata);
+          textContent = [
+            metadata.labels?.map((l: any) => l.Name).join(' '),
+            metadata.text?.map((t: any) => t.DetectedText).join(' '),
+            metadata.faces?.length ? `${metadata.faces.length} faces detected` : ''
+          ].filter(Boolean).join('. ');
+        }
+      } else if (contentType === 'video') {
+        // For videos, use transcription and labels
+        const videoData = await db('media_items')
+          .where('id', content)
+          .first();
+        
+        if (videoData?.metadata) {
+          const metadata = JSON.parse(videoData.metadata);
+          textContent = metadata.transcription?.TranscriptFileUri || content;
+        }
+      }
+
+      // Call OpenAI API
+      const response = await fetch('https://api.openai.com/v1/embeddings', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${process.env.OPENAI_API_KEY}`
+        },
+        body: JSON.stringify({
+          model: 'text-embedding-ada-002',
+          input: textContent.substring(0, 8191) // Max token limit
+        })
+      });
+
+      if (!response.ok) {
+        throw new Error(`OpenAI API error: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      return data.data[0].embedding;
+    } catch (error) {
+      logger.error('Failed to generate embedding', error);
+      throw error;
+    }
+  }
+
   private async storeEmbedding(
     mediaItemId: string,
     embedding: number[],
-    metadata?: Record<string, any>
-  ) {
+    metadata?: Record<string, string | number | boolean>
+  ): Promise<void> {
+    // Store embedding in pgvector format
+    const vectorString = `[${embedding.join(',')}]`;
+    
     await db('embeddings').insert({
       id: crypto.randomUUID(),
       media_item_id: mediaItemId,
-      embedding: JSON.stringify(embedding), // In production, use pgvector format
+      embedding: db.raw(`'${vectorString}'::vector`), // Proper pgvector format
       metadata: metadata ? JSON.stringify(metadata) : null,
       created_at: new Date()
     });
+  }
+}
+```
+
+### 3.6 Create Document Processing Worker
+Create `src/workers/document-processing-worker.ts`:
+
+```typescript
+import { Job } from 'bullmq';
+import { BaseWorker } from '@/workers/base-worker';
+import { s3Service } from '@/services/aws/s3-service';
+import { DocumentProcessingJobData, JobStatus } from '@/types/queue.types';
+import { logger } from '@/lib/monitoring/logger';
+import * as pdfParse from 'pdf-parse';
+import { TextractClient, DetectDocumentTextCommand } from '@aws-sdk/client-textract';
+
+interface DocumentProcessingResult {
+  text?: string;
+  textLength?: number;
+  pages?: number;
+  info?: any;
+  tables?: any[];
+  forms?: any[];
+}
+
+export class DocumentProcessingWorker extends BaseWorker<DocumentProcessingJobData> {
+  private textractClient: TextractClient;
+
+  constructor(connection: ConnectionOptions) {
+    super('document-processing', connection, 3); // Process 3 documents concurrently
+    this.textractClient = new TextractClient({ region: process.env.AWS_REGION || 'us-east-1' });
+  }
+
+  protected async process(job: Job<DocumentProcessingJobData>): Promise<DocumentProcessingResult> {
+    const { userId, mediaItemId, s3Key, documentType, operations } = job.data;
+    const results: DocumentProcessingResult = {};
+    let totalCost = 0;
+
+    try {
+      await this.updateMediaItemStatus(mediaItemId, JobStatus.PROCESSING);
+
+      let currentStep = 0;
+      const totalSteps = Object.keys(operations).length;
+
+      if (operations.extractText) {
+        await this.updateProgress(job, {
+          current: currentStep,
+          total: totalSteps,
+          message: 'Extracting text from document',
+          subTasks: {
+            extractText: { status: 'processing' }
+          }
+        });
+
+        let extractedText = '';
+        
+        if (documentType === 'pdf') {
+          // For PDFs, we can use pdf-parse library or AWS Textract
+          const documentBuffer = await s3Service.getObject(s3Key);
+          
+          if (operations.detectTables || operations.detectForms) {
+            // Use Textract for complex documents with tables/forms
+            const command = new DetectDocumentTextCommand({
+              Document: {
+                S3Object: {
+                  Bucket: process.env.AWS_S3_BUCKET,
+                  Name: s3Key
+                }
+              }
+            });
+            
+            const response = await this.textractClient.send(command);
+            extractedText = response.Blocks
+              ?.filter(block => block.BlockType === 'LINE')
+              .map(block => block.Text)
+              .join(' ') || '';
+            
+            // Textract pricing: $1.50 per 1000 pages
+            const pageCount = Math.max(1, Math.ceil((response.Blocks?.length || 0) / 30));
+            const textractCost = (pageCount / 1000) * 1.50;
+            totalCost += textractCost;
+            await this.trackCost(userId, 'textract', 'detectDocumentText', textractCost, {
+              mediaItemId,
+              pageCount
+            });
+            
+            if (operations.detectTables) {
+              results.tables = response.Blocks?.filter(block => block.BlockType === 'TABLE') || [];
+            }
+            
+            if (operations.detectForms) {
+              results.forms = response.Blocks?.filter(block => 
+                block.BlockType === 'KEY_VALUE_SET' && block.EntityTypes?.includes('KEY')
+              ) || [];
+            }
+          } else {
+            // Use pdf-parse for simple text extraction
+            const pdfData = await pdfParse(documentBuffer);
+            extractedText = pdfData.text;
+            results.pages = pdfData.numpages;
+            results.info = pdfData.info;
+          }
+        } else if (documentType === 'txt') {
+          // For text files, simply read the content
+          const documentBuffer = await s3Service.getObject(s3Key);
+          extractedText = documentBuffer.toString('utf-8');
+        } else if (documentType === 'docx') {
+          // For Word documents, use Textract
+          const command = new DetectDocumentTextCommand({
+            Document: {
+              S3Object: {
+                Bucket: process.env.AWS_S3_BUCKET,
+                Name: s3Key
+              }
+            }
+          });
+          
+          const response = await this.textractClient.send(command);
+          extractedText = response.Blocks
+            ?.filter(block => block.BlockType === 'LINE')
+            .map(block => block.Text)
+            .join(' ') || '';
+          
+          const pageCount = 1; // DOCX usually processed as single page
+          const textractCost = (pageCount / 1000) * 1.50;
+          totalCost += textractCost;
+          await this.trackCost(userId, 'textract', 'detectDocumentText', textractCost, {
+            mediaItemId,
+            documentType
+          });
+        }
+
+        results.text = extractedText;
+        results.textLength = extractedText.length;
+        
+        // If text was extracted, queue it for text analysis
+        if (extractedText && extractedText.length > 0) {
+          const queueManager = (await import('@/lib/queue/queue-manager')).queueManager;
+          await queueManager.addTextAnalysisJob({
+            userId,
+            mediaItemId,
+            s3Key,
+            costCenter: job.data.costCenter,
+            text: extractedText,
+            operations: {
+              detectSentiment: true,
+              detectEntities: true,
+              detectKeyPhrases: true,
+              detectLanguage: true
+            }
+          });
+          
+          logger.info(`Queued text analysis for document ${mediaItemId}`);
+        }
+
+        currentStep++;
+      }
+
+      await this.updateMediaItemStatus(mediaItemId, JobStatus.COMPLETED, {
+        ...results,
+        processingCost: totalCost,
+        processedAt: new Date().toISOString()
+      });
+
+      await this.updateProgress(job, {
+        current: totalSteps,
+        total: totalSteps,
+        message: 'Processing complete',
+        subTasks: {}
+      });
+
+      logger.info(`Document processing completed for ${mediaItemId}`, {
+        mediaItemId,
+        totalCost,
+        operations: Object.keys(operations),
+        documentType,
+        textLength: results.textLength
+      });
+
+      return results;
+    } catch (error) {
+      await this.updateMediaItemStatus(mediaItemId, JobStatus.FAILED, {
+        error: error instanceof Error ? error.message : 'Unknown error'
+      });
+      throw error;
+    }
   }
 }
 ```
@@ -990,13 +1367,18 @@ Create `src/lib/queue/worker-manager.ts`:
 import { ImageProcessingWorker } from '@/workers/image-processing-worker';
 import { VideoProcessingWorker } from '@/workers/video-processing-worker';
 import { TextAnalysisWorker } from '@/workers/text-analysis-worker';
+import { DocumentProcessingWorker } from '@/workers/document-processing-worker';
 import { EmbeddingGenerationWorker } from '@/workers/embedding-generation-worker';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
+
+interface WorkerInstance {
+  close(): Promise<void>;
+}
 
 export class WorkerManager {
   private static instance: WorkerManager;
-  private workers: any[] = [];
-  private connection: any;
+  private workers: WorkerInstance[] = [];
+  private connection: ConnectionOptions;
 
   private constructor() {}
 
@@ -1007,7 +1389,7 @@ export class WorkerManager {
     return WorkerManager.instance;
   }
 
-  async initialize() {
+  async initialize(): Promise<void> {
     try {
       this.connection = {
         host: process.env.REDIS_HOST || 'localhost',
@@ -1021,6 +1403,7 @@ export class WorkerManager {
       this.workers.push(new ImageProcessingWorker(this.connection));
       this.workers.push(new VideoProcessingWorker(this.connection));
       this.workers.push(new TextAnalysisWorker(this.connection));
+      this.workers.push(new DocumentProcessingWorker(this.connection));
       this.workers.push(new EmbeddingGenerationWorker(this.connection));
 
       logger.info('All workers initialized successfully');
@@ -1030,7 +1413,7 @@ export class WorkerManager {
     }
   }
 
-  async shutdown() {
+  async shutdown(): Promise<void> {
     logger.info('Shutting down workers...');
     
     await Promise.all(
@@ -1057,7 +1440,7 @@ import { queueManager } from '@/lib/queue/queue-manager';
 import { JobType } from '@/types/queue.types';
 import { validateRequest } from '@/lib/middleware/validation';
 import { requireAuth } from '@/lib/middleware/auth';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
 
 export async function GET(request: NextRequest) {
   try {
@@ -1094,7 +1477,7 @@ Create `src/app/api/queues/[jobType]/[jobId]/route.ts`:
 import { NextRequest, NextResponse } from 'next/server';
 import { queueManager } from '@/lib/queue/queue-manager';
 import { requireAuth } from '@/lib/middleware/auth';
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
 
 export async function GET(
   request: NextRequest,
@@ -1146,9 +1529,9 @@ export async function GET(
 Create `src/lib/queue/initialize.ts`:
 
 ```typescript
-import { queueManager } from './queue-manager';
-import { workerManager } from './worker-manager';
-import { logger } from '@/lib/logger';
+import { queueManager } from '@/lib/queue/queue-manager';
+import { workerManager } from '@/lib/queue/worker-manager';
+import { logger } from '@/lib/monitoring/logger';
 
 let initialized = false;
 
@@ -1209,14 +1592,14 @@ const redisClient = getRedisClient();
 
 ### Using AWS Services from Phase 9
 ```typescript
-import { rekognitionService } from '@/lib/aws/rekognition-service';
-import { transcribeService } from '@/lib/aws/transcribe-service';
-import { comprehendService } from '@/lib/aws/comprehend-service';
+import { rekognitionService } from '@/services/aws/rekognition-service';
+import { transcribeService } from '@/services/aws/transcribe-service';
+import { comprehendService } from '@/services/aws/comprehend-service';
 ```
 
 ### Using Cost Tracking from Phase 7
 ```typescript
-import { CostService } from '@/lib/services/cost-service';
+import { CostTrackingService } from '@/services/cost-tracking';
 
 // Track costs for each operation
 await this.costService.trackUsage(userId, service, operation, cost, metadata);
@@ -1224,7 +1607,7 @@ await this.costService.trackUsage(userId, service, operation, cost, metadata);
 
 ### Using Logger from Phase 4
 ```typescript
-import { logger } from '@/lib/logger';
+import { logger } from '@/lib/monitoring/logger';
 
 // Comprehensive logging throughout the queue system
 logger.info('Processing job', { jobId, queueName, data });

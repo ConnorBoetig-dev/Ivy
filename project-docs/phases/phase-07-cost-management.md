@@ -443,7 +443,8 @@ export class CostTrackingService {
       percentage: `${((current / budget) * 100).toFixed(1)}%`,
     });
 
-    // TODO: Send email/notification to user
+    // Send budget alert notification
+    await this.sendBudgetAlert(userId, currentSpend, budgetAmount);
 
     // Mark as sent
     await cache.set(alertKey, true, 86400); // Don't resend for 24 hours

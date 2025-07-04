@@ -3,6 +3,38 @@
 ## 🎯 Project Overview
 Building a production-ready AI-powered media search application where users upload photos/videos that are automatically processed through AWS AI services (Rekognition, Transcribe, Comprehend) and vectorized using OpenAI embeddings for natural language search.
 
+## 💻 System Requirements
+
+### Development Environment
+- **Node.js**: v18.0.0 or higher (LTS recommended)
+- **npm**: v9.0.0 or higher
+- **RAM**: Minimum 8GB (16GB recommended for running all services locally)
+- **Disk Space**: At least 10GB free space for dependencies and local data
+- **Operating System**: macOS, Linux, or Windows with WSL2
+
+### Required Services & Tools
+- **Docker**: v20.10+ (for local PostgreSQL, Redis)
+- **Git**: v2.30+
+- **PostgreSQL**: v15+ with pgvector extension
+- **Redis**: v7.0+
+- **AWS CLI**: v2.0+ (configured with credentials)
+
+### Cloud Service Requirements
+- **AWS Account**: With access to Rekognition, Transcribe, Comprehend, S3, Textract
+- **Firebase Account**: For authentication services
+- **Stripe Account**: For payment processing
+- **Cloudflare Account**: For CDN and security layer
+- **OpenAI API Key**: For embedding generation
+
+### Network Requirements
+- **Ports**: 
+  - 3000 (Next.js development server)
+  - 5432 (PostgreSQL)
+  - 6379 (Redis)
+  - 9090 (Prometheus)
+  - 3001 (Grafana)
+- **Internet**: Stable connection required for cloud services
+
 ## 🚀 Quick Start for Claude Code
 
 ### Current Development Status
